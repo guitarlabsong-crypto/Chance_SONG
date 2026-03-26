@@ -3,191 +3,218 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meteor Ping-Pong Art</title>
+    <title>Aleatoric Space - SONG, YOUNG-MIN</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; touch-action: none; font-family: 'Pretendard', sans-serif; }
-        canvas { display: block; }
-        
-        #ui-layer { position: fixed; top: 30px; width: 100%; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
-        .btn { 
-            pointer-events: auto; padding: 15px 30px; font-size: 0.9rem; font-weight: bold; 
-            background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.3); 
-            border-radius: 50px; cursor: pointer; backdrop-filter: blur(10px); transition: 0.3s;
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; touch-action: none; }
+        #header {
+            position: absolute; top: 0; width: 100%; height: 70px;
+            background: rgba(0, 0, 0, 0.9); color: #fff; display: flex;
+            flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+            border-bottom: 1px solid #444;
         }
-        .btn:active { background: #fff; color: #000; scale: 0.95; }
-        #msg { color: rgba(255,255,255,0.4); font-size: 0.75rem; margin-top: 12px; letter-spacing: 1px; }
+        #watermark { font-size: 11px; letter-spacing: 2px; color: #0ff; margin-bottom: 8px; font-weight: bold; }
+        .controls { display: flex; gap: 20px; }
+        .btn {
+            background: none; border: 1px solid #fff; color: white;
+            width: 35px; height: 35px; border-radius: 50%; font-size: 18px;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+        canvas { display: block; }
     </style>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <button id="spawn-btn" class="btn" onclick="spawnMeteor()">GENERATE METEOR</button>
-        <div id="msg">DRAG TO FLING | TAP TO STOP</div>
+<div id="header">
+    <div id="watermark">SONG, YOUNG-MIN Guitar Lab</div>
+    <div class="controls">
+        <div class="btn" onclick="resetMeteor()">⭐</div>
+        <div class="btn" onclick="togglePause()" id="pauseBtn">⏸</div>
     </div>
+</div>
 
-    <canvas id="artCanvas"></canvas>
+<canvas id="space"></canvas>
 
-    <script>
-        const canvas = document.getElementById('artCanvas');
-        const ctx = canvas.getContext('2d');
-        let width, height;
-        
-        let meteor = null;
-        const friction = 0.985; // 공기 저항 (서서히 느려짐)
-        const wallBounce = 0.9; // 벽에 부딪힐 때 탄성
-        const notes = [];
+<script>
+    const canvas = document.getElementById('space');
+    const ctx = canvas.getContext('2d');
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const freqs = [261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00, 415.30, 440.00, 466.16, 493.88];
+    
+    let width, height;
+    let isPaused = false;
+    let hitBlocks = { top: -1, bottom: -1, left: -1, right: -1 };
 
-        function init() {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-            
-            // 음표를 모서리가 아닌 화면 중앙부에 고르게 분산 배치
-            notes.length = 0;
-            for(let i=0; i<15; i++) {
-                notes.push({
-                    x: Math.random() * (width * 0.8) + (width * 0.1),
-                    y: Math.random() * (height * 0.7) + (height * 0.15),
-                    active: 0
-                });
+    // --- Audio Context with Reverb ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const reverbGain = audioCtx.createGain();
+    reverbGain.gain.value = 0.4;
+    reverbGain.connect(audioCtx.destination);
+
+    function playNote(index) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freqs[index % 12], audioCtx.currentTime);
+        g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
+        osc.connect(g);
+        g.connect(reverbGain);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 1.5);
+    }
+
+    class Meteor {
+        constructor() {
+            this.reset();
+        }
+        reset() {
+            this.x = window.innerWidth / 2;
+            this.y = window.innerHeight / 2;
+            this.vx = 0;
+            this.vy = 0;
+            this.radius = 12;
+            this.isDragging = false;
+            this.history = [];
+            // 3중 진자용 관절 각도
+            this.angles = [0, 0, 0];
+            this.vAngles = [0.02, 0.05, 0.08];
+        }
+        update() {
+            if (isPaused || this.isDragging) return;
+
+            // 속도 제한 (너무 빠르지 않게)
+            const speedLimit = 8;
+            this.vx = Math.max(Math.min(this.vx, speedLimit), -speedLimit);
+            this.vy = Math.max(Math.min(this.vy, speedLimit), -speedLimit);
+
+            this.x += this.vx;
+            this.y += this.vy;
+
+            // 3중 진자 회전 로직
+            for(let i=0; i<3; i++) this.angles[i] += this.vAngles[i];
+
+            const padding = 25; // 벽돌 두께만큼 패딩
+            // 벽 충돌 (가로/세로 벽돌 감지)
+            if (this.x < padding || this.x > width - padding) {
+                this.vx *= -1;
+                const idx = Math.floor(((this.y - 70) / (height - 70)) * 12);
+                if (this.x < padding) hitBlocks.left = idx; else hitBlocks.right = idx;
+                playNote(idx);
             }
+            if (this.y < 70 + padding || this.y > height - padding) {
+                this.vy *= -1;
+                const idx = Math.floor((this.x / width) * 12);
+                if (this.y < 70 + padding) hitBlocks.top = idx; else hitBlocks.bottom = idx;
+                playNote(idx);
+            }
+
+            this.history.push({x: this.x, y: this.y});
+            if (this.history.length > 20) this.history.shift();
+        }
+        draw() {
+            // 궤적
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
+            this.history.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+
+            // 진자 관절 시각화
+            let cx = this.x, cy = this.y;
+            ctx.strokeStyle = '#0ff';
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            for(let i=0; i<3; i++) {
+                cx += Math.cos(this.angles[i]) * 15;
+                cy += Math.sin(this.angles[i]) * 15;
+                ctx.lineTo(cx, cy);
+            }
+            ctx.stroke();
+
+            // 유성 본체
+            ctx.fillStyle = '#fff';
+            ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    const meteor = new Meteor();
+
+    function drawGrid() {
+        const p = 25; // 벽돌 두께
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+
+        // 상단/하단 벽돌
+        for(let i=0; i<12; i++) {
+            let x = (width / 12) * i;
+            let w = width / 12;
+            // 상단
+            ctx.fillStyle = hitBlocks.top === i ? '#0ff' : 'rgba(255,255,255,0.1)';
+            ctx.fillRect(x+1, 71, w-2, p);
+            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], x + w/2, 70 + p/2 + 5);
+            // 하단
+            ctx.fillStyle = hitBlocks.bottom === i ? '#0ff' : 'rgba(255,255,255,0.1)';
+            ctx.fillRect(x+1, height - p - 1, w-2, p);
+            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], x + w/2, height - p/2 + 5);
         }
 
-        // 1. 초기엔 유성이 없다가 버튼 클릭 시 생성
-        function spawnMeteor() {
-            meteor = {
-                x: width / 2,
-                y: height / 2,
-                vx: 0,
-                vy: 0,
-                radius: 8,
-                trail: [],
-                isDragging: false
-            };
-            document.getElementById('spawn-btn').innerText = "RESET";
+        // 좌측/우측 벽돌
+        const sideH = (height - 70) / 12;
+        for(let i=0; i<12; i++) {
+            let y = 70 + (sideH * i);
+            // 좌측
+            ctx.fillStyle = hitBlocks.left === i ? '#0ff' : 'rgba(255,255,255,0.1)';
+            ctx.fillRect(1, y+1, p, sideH-2);
+            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], p/2, y + sideH/2 + 5);
+            // 우측
+            ctx.fillStyle = hitBlocks.right === i ? '#0ff' : 'rgba(255,255,255,0.1)';
+            ctx.fillRect(width - p - 1, y+1, p, sideH-2);
+            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], width - p/2, y + sideH/2 + 5);
         }
+        // 충돌 하이라이트 초기화 (잔상)
+        Object.keys(hitBlocks).forEach(k => hitBlocks[k] = -1);
+    }
 
-        // 터치/마우스 인터랙션
-        let isMoving = false;
-        let lastPos = { x: 0, y: 0 };
-
-        canvas.addEventListener('pointerdown', e => {
-            if(!meteor) return;
-            const d = Math.hypot(e.clientX - meteor.x, e.clientY - meteor.y);
-            
-            // 유성을 터치하면 즉시 정지 (핑퐁 제어)
-            if(d < 60) {
-                meteor.vx = 0;
-                meteor.vy = 0;
-                meteor.isDragging = true;
-            }
-            lastPos = { x: e.clientX, y: e.clientY };
-        });
-
-        canvas.addEventListener('pointermove', e => {
-            if(!meteor || !meteor.isDragging) return;
-            
-            // 드래그하는 속도를 계산하여 유성에 부여
-            const dx = e.clientX - lastPos.x;
-            const dy = e.clientY - lastPos.y;
-            
-            meteor.x = e.clientX;
-            meteor.y = e.clientY;
-            
-            meteor.vx = dx * 0.5; // 던지는 힘 조절
-            meteor.vy = dy * 0.5;
-            
-            lastPos = { x: e.clientX, y: e.clientY };
-        });
-
-        canvas.addEventListener('pointerup', () => {
-            if(meteor) meteor.isDragging = false;
-        });
-
-        function update() {
-            if (!meteor || meteor.isDragging) return;
-
-            // 위치 업데이트
-            meteor.x += meteor.vx;
-            meteor.y += meteor.vy;
-
-            // 2. 핑퐁 메커니즘 (벽 충돌 반사)
-            if (meteor.x + meteor.radius > width || meteor.x - meteor.radius < 0) {
-                meteor.vx *= -1 * wallBounce;
-                meteor.x = meteor.x < 0 ? meteor.radius : width - meteor.radius;
-            }
-            if (meteor.y + meteor.radius > height || meteor.y - meteor.radius < 0) {
-                meteor.vy *= -1 * wallBounce;
-                meteor.y = meteor.y < 0 ? meteor.radius : height - meteor.radius;
-            }
-
-            // 마찰력 적용 (너무 빠르지 않게 서서히 감소)
-            meteor.vx *= friction;
-            meteor.vy *= friction;
-
-            // 궤적(꼬리) 저장
-            meteor.trail.push({ x: meteor.x, y: meteor.y });
-            if (meteor.trail.length > 25) meteor.trail.shift();
-
-            // 음표 충돌 체크
-            notes.forEach(note => {
-                const dist = Math.hypot(meteor.x - note.x, meteor.y - note.y);
-                if (dist < 30 && note.active === 0) {
-                    note.active = 30; // 애니메이션 프레임
-                    // 여기서 '틱' 하는 핑퐁 사운드 연결 포인트
-                }
-                if (note.active > 0) note.active--;
-            });
+    let startT = {x:0, y:0};
+    canvas.addEventListener('touchstart', e => {
+        const tx = e.touches[0].clientX; const ty = e.touches[0].clientY;
+        if (Math.hypot(meteor.x - tx, meteor.y - ty) < 40) {
+            meteor.isDragging = true;
+            startT = {x: tx, y: ty};
         }
-
-        function draw() {
-            // 잔상 효과를 위해 투명한 검정색으로 덮음
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-            ctx.fillRect(0, 0, width, height);
-
-            if (meteor) {
-                // 유성 꼬리 그리기 (핑퐁 궤적)
-                ctx.beginPath();
-                meteor.trail.forEach((p, i) => {
-                    ctx.lineTo(p.x, p.y);
-                    ctx.strokeStyle = `rgba(0, 255, 200, ${i / 25})`;
-                    ctx.lineWidth = i / 3;
-                });
-                ctx.stroke();
-
-                // 유성 헤드
-                ctx.shadowBlur = 20;
-                ctx.shadowColor = '#0ff';
-                ctx.fillStyle = '#fff';
-                ctx.beginPath();
-                ctx.arc(meteor.x, meteor.y, meteor.radius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            }
-
-            // 음표 배치 (화면 곳곳에 흩어짐)
-            notes.forEach(note => {
-                const alpha = note.active > 0 ? 1 : 0.2;
-                const size = note.active > 0 ? 6 : 3;
-                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-                ctx.beginPath();
-                ctx.arc(note.x, note.y, size, 0, Math.PI * 2);
-                ctx.fill();
-                
-                if(note.active > 0) {
-                    ctx.strokeStyle = `rgba(0, 255, 255, ${note.active/30})`;
-                    ctx.beginPath();
-                    ctx.arc(note.x, note.y, 40 - note.active, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-            });
-
-            update();
-            requestAnimationFrame(draw);
+    });
+    canvas.addEventListener('touchend', e => {
+        if(meteor.isDragging) {
+            meteor.vx = (e.changedTouches[0].clientX - startT.x) * 0.15;
+            meteor.vy = (e.changedTouches[0].clientY - startT.y) * 0.15;
+            meteor.isDragging = false;
         }
+    });
 
-        window.addEventListener('resize', init);
-        init();
-        draw();
-    </script>
+    function resetMeteor() { meteor.reset(); }
+    function togglePause() { 
+        isPaused = !isPaused; 
+        document.getElementById('pauseBtn').innerText = isPaused ? '▶' : '⏸';
+    }
+
+    function resize() {
+        width = window.innerWidth; height = window.innerHeight;
+        canvas.width = width; canvas.height = height;
+    }
+
+    function render() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fillRect(0, 0, width, height);
+        drawGrid();
+        meteor.update();
+        meteor.draw();
+        requestAnimationFrame(render);
+    }
+
+    window.addEventListener('resize', resize);
+    resize(); render();
+</script>
 </body>
 </html>
