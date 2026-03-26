@@ -3,218 +3,210 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aleatoric Space - SONG, YOUNG-MIN</title>
+    <title>Meteor Triple Pendulum Art</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; touch-action: none; }
-        #header {
-            position: absolute; top: 0; width: 100%; height: 70px;
-            background: rgba(0, 0, 0, 0.9); color: #fff; display: flex;
-            flex-direction: column; align-items: center; justify-content: center; z-index: 100;
-            border-bottom: 1px solid #444;
-        }
-        #watermark { font-size: 11px; letter-spacing: 2px; color: #0ff; margin-bottom: 8px; font-weight: bold; }
-        .controls { display: flex; gap: 20px; }
-        .btn {
-            background: none; border: 1px solid #fff; color: white;
-            width: 35px; height: 35px; border-radius: 50%; font-size: 18px;
-            display: flex; align-items: center; justify-content: center; cursor: pointer;
-        }
+        body { margin: 0; background: #000; overflow: hidden; touch-action: none; font-family: sans-serif; }
         canvas { display: block; }
+        
+        /* UI 레이어 */
+        #ui-layer { position: fixed; top: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+        .btn { 
+            pointer-events: auto; padding: 12px 24px; font-size: 1rem; font-weight: bold; 
+            background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 30px;
+            cursor: pointer; backdrop-filter: blur(5px); transition: 0.3s;
+        }
+        .btn:active { background: #fff; color: #000; }
+        #info { color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 10px; }
     </style>
 </head>
 <body>
 
-<div id="header">
-    <div id="watermark">SONG, YOUNG-MIN Guitar Lab</div>
-    <div class="controls">
-        <div class="btn" onclick="resetMeteor()">⭐</div>
-        <div class="btn" onclick="togglePause()" id="pauseBtn">⏸</div>
+    <div id="ui-layer">
+        <button id="spawn-btn" class="btn" onclick="spawnMeteor()">GENERATE METEOR</button>
+        <div id="info">Drag to push | Tap to stop</div>
     </div>
-</div>
 
-<canvas id="space"></canvas>
+    <canvas id="artCanvas"></canvas>
 
-<script>
-    const canvas = document.getElementById('space');
-    const ctx = canvas.getContext('2d');
-    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    const freqs = [261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00, 415.30, 440.00, 466.16, 493.88];
-    
-    let width, height;
-    let isPaused = false;
-    let hitBlocks = { top: -1, bottom: -1, left: -1, right: -1 };
+    <script>
+        const canvas = document.getElementById('artCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        
+        // 물리 변수 (삼중 진자 매커니즘)
+        let meteor = null;
+        const g = 0.3; // 중력 (속도가 너무 빠르지 않게 조정)
+        const damping = 0.995; // 공기 저항 (에너지 손실)
 
-    // --- Audio Context with Reverb ---
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const reverbGain = audioCtx.createGain();
-    reverbGain.gain.value = 0.4;
-    reverbGain.connect(audioCtx.destination);
+        // 음표(Note) 위치 데이터 - 박스 모서리가 아닌 화면에 고르게 배치
+        const notes = [];
+        const noteCount = 12;
 
-    function playNote(index) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freqs[index % 12], audioCtx.currentTime);
-        g.gain.setValueAtTime(0.2, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
-        osc.connect(g);
-        g.connect(reverbGain);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 1.5);
-    }
-
-    class Meteor {
-        constructor() {
-            this.reset();
-        }
-        reset() {
-            this.x = window.innerWidth / 2;
-            this.y = window.innerHeight / 2;
-            this.vx = 0;
-            this.vy = 0;
-            this.radius = 12;
-            this.isDragging = false;
-            this.history = [];
-            // 3중 진자용 관절 각도
-            this.angles = [0, 0, 0];
-            this.vAngles = [0.02, 0.05, 0.08];
-        }
-        update() {
-            if (isPaused || this.isDragging) return;
-
-            // 속도 제한 (너무 빠르지 않게)
-            const speedLimit = 8;
-            this.vx = Math.max(Math.min(this.vx, speedLimit), -speedLimit);
-            this.vy = Math.max(Math.min(this.vy, speedLimit), -speedLimit);
-
-            this.x += this.vx;
-            this.y += this.vy;
-
-            // 3중 진자 회전 로직
-            for(let i=0; i<3; i++) this.angles[i] += this.vAngles[i];
-
-            const padding = 25; // 벽돌 두께만큼 패딩
-            // 벽 충돌 (가로/세로 벽돌 감지)
-            if (this.x < padding || this.x > width - padding) {
-                this.vx *= -1;
-                const idx = Math.floor(((this.y - 70) / (height - 70)) * 12);
-                if (this.x < padding) hitBlocks.left = idx; else hitBlocks.right = idx;
-                playNote(idx);
+        function init() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            
+            // 음표들을 화면 곳곳에 배치 (모서리 집중 방지)
+            notes.length = 0;
+            for(let i=0; i<noteCount; i++) {
+                notes.push({
+                    x: Math.random() * (width - 100) + 50,
+                    y: Math.random() * (height - 200) + 100,
+                    freq: 220 * Math.pow(1.059, i),
+                    active: false
+                });
             }
-            if (this.y < 70 + padding || this.y > height - padding) {
-                this.vy *= -1;
-                const idx = Math.floor((this.x / width) * 12);
-                if (this.y < 70 + padding) hitBlocks.top = idx; else hitBlocks.bottom = idx;
-                playNote(idx);
+        }
+
+        // 1. 유성 생성 (처음엔 없고 버튼 클릭 시 중앙 생성)
+        function spawnMeteor() {
+            const centerX = width / 2;
+            const centerY = height / 3;
+            meteor = {
+                origin: { x: centerX, y: centerY },
+                // 삼중 진자의 세 마디 (길이와 질량)
+                l1: 60, l2: 50, l3: 40,
+                m1: 10, m2: 10, m3: 10,
+                // 각도 및 각속도
+                a1: 0, a2: 0, a3: 0,
+                v1: 0, v2: 0, v3: 0,
+                isDragging: false,
+                trail: []
+            };
+            document.getElementById('spawn-btn').innerText = "RESET METEOR";
+        }
+
+        // 드래그 및 터치 인터랙션
+        let isMouseDown = false;
+        let lastMouse = { x: 0, y: 0 };
+
+        canvas.addEventListener('pointerdown', e => {
+            if(!meteor) return;
+            const dist = Math.hypot(e.clientX - getMeteorPos().x, e.clientY - getMeteorPos().y);
+            
+            if(dist < 50) { // 유성을 터치하면 멈춤
+                meteor.v1 = meteor.v2 = meteor.v3 = 0;
+                meteor.isDragging = true;
+            }
+            isMouseDown = true;
+            lastMouse = { x: e.clientX, y: e.clientY };
+        });
+
+        canvas.addEventListener('pointermove', e => {
+            if(meteor && meteor.isDragging) {
+                // 드래그 방향으로 각속도 부여 (자유로운 방향으로 밀기)
+                const dx = e.clientX - lastMouse.x;
+                meteor.v1 += dx * 0.001;
+                meteor.v2 += dx * 0.002;
+                meteor.v3 += dx * 0.003;
+                lastMouse = { x: e.clientX, y: e.clientY };
+            }
+        });
+
+        canvas.addEventListener('pointerup', () => {
+            if(meteor) meteor.isDragging = false;
+            isMouseDown = false;
+        });
+
+        function getMeteorPos() {
+            if(!meteor) return {x:-100, y:-100};
+            const x1 = meteor.origin.x + meteor.l1 * Math.sin(meteor.a1);
+            const y1 = meteor.origin.y + meteor.l1 * Math.cos(meteor.a1);
+            const x2 = x1 + meteor.l2 * Math.sin(meteor.a2);
+            const y2 = y1 + meteor.l2 * Math.cos(meteor.a2);
+            const x3 = x2 + meteor.l3 * Math.sin(meteor.a3);
+            const y3 = y2 + meteor.l3 * Math.cos(meteor.a3);
+            return { x: x3, y: y3, x1, y1, x2, y2 };
+        }
+
+        function update() {
+            if (meteor && !meteor.isDragging) {
+                // 삼중 진자 물리 엔진 (단순화된 근사식 적용 - 속도 제어 중심)
+                let force1 = -g * Math.sin(meteor.a1);
+                let force2 = -g * Math.sin(meteor.a2);
+                let force3 = -g * Math.sin(meteor.a3);
+
+                meteor.v1 = (meteor.v1 + force1 * 0.05) * damping;
+                meteor.v2 = (meteor.v2 + force2 * 0.07) * damping;
+                meteor.v3 = (meteor.v3 + force3 * 0.09) * damping;
+
+                meteor.a1 += meteor.v1;
+                meteor.a2 += meteor.v2;
+                meteor.a3 += meteor.v3;
+
+                // 꼬리 데이터 저장
+                const pos = getMeteorPos();
+                meteor.trail.push({x: pos.x, y: pos.y});
+                if(meteor.trail.length > 30) meteor.trail.shift();
+
+                // 음표 충돌 감지
+                notes.forEach(note => {
+                    const d = Math.hypot(pos.x - note.x, pos.y - note.y);
+                    if(d < 25 && !note.active) {
+                        note.active = true;
+                        setTimeout(() => note.active = false, 500);
+                        // 여기서 소리 발생 로직 연결 가능
+                    }
+                });
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // 잔상 효과
+            ctx.fillRect(0, 0, width, height);
+
+            if(meteor) {
+                const p = getMeteorPos();
+                
+                // 1. 진자 연결선 (삼중 구조 시각화)
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.beginPath();
+                ctx.moveTo(meteor.origin.x, meteor.origin.y);
+                ctx.lineTo(p.x1, p.y1);
+                ctx.lineTo(p.x2, p.y2);
+                ctx.lineTo(p.x, p.y);
+                ctx.stroke();
+
+                // 2. 유성 꼬리 (삼중진자 궤적)
+                ctx.beginPath();
+                meteor.trail.forEach((t, i) => {
+                    ctx.lineTo(t.x, t.y);
+                    ctx.strokeStyle = `rgba(0, 200, 255, ${i / 30})`;
+                    ctx.lineWidth = i / 5;
+                });
+                ctx.stroke();
+
+                // 3. 유성 헤드
+                ctx.fillStyle = '#fff';
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#0cf';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
             }
 
-            this.history.push({x: this.x, y: this.y});
-            if (this.history.length > 20) this.history.shift();
-        }
-        draw() {
-            // 궤적
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
-            this.history.forEach(p => ctx.lineTo(p.x, p.y));
-            ctx.stroke();
+            // 4. 음표 배치 (화면 분산)
+            notes.forEach(note => {
+                ctx.fillStyle = note.active ? '#fff' : 'rgba(255,255,255,0.2)';
+                ctx.beginPath();
+                ctx.arc(note.x, note.y, 4, 0, Math.PI*2);
+                ctx.fill();
+                if(note.active) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(note.x, note.y, 20, 0, Math.PI*2);
+                    ctx.stroke();
+                }
+            });
 
-            // 진자 관절 시각화
-            let cx = this.x, cy = this.y;
-            ctx.strokeStyle = '#0ff';
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            for(let i=0; i<3; i++) {
-                cx += Math.cos(this.angles[i]) * 15;
-                cy += Math.sin(this.angles[i]) * 15;
-                ctx.lineTo(cx, cy);
-            }
-            ctx.stroke();
-
-            // 유성 본체
-            ctx.fillStyle = '#fff';
-            ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
-            ctx.shadowBlur = 0;
-        }
-    }
-
-    const meteor = new Meteor();
-
-    function drawGrid() {
-        const p = 25; // 벽돌 두께
-        ctx.font = '10px Arial';
-        ctx.textAlign = 'center';
-
-        // 상단/하단 벽돌
-        for(let i=0; i<12; i++) {
-            let x = (width / 12) * i;
-            let w = width / 12;
-            // 상단
-            ctx.fillStyle = hitBlocks.top === i ? '#0ff' : 'rgba(255,255,255,0.1)';
-            ctx.fillRect(x+1, 71, w-2, p);
-            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], x + w/2, 70 + p/2 + 5);
-            // 하단
-            ctx.fillStyle = hitBlocks.bottom === i ? '#0ff' : 'rgba(255,255,255,0.1)';
-            ctx.fillRect(x+1, height - p - 1, w-2, p);
-            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], x + w/2, height - p/2 + 5);
+            update();
+            requestAnimationFrame(draw);
         }
 
-        // 좌측/우측 벽돌
-        const sideH = (height - 70) / 12;
-        for(let i=0; i<12; i++) {
-            let y = 70 + (sideH * i);
-            // 좌측
-            ctx.fillStyle = hitBlocks.left === i ? '#0ff' : 'rgba(255,255,255,0.1)';
-            ctx.fillRect(1, y+1, p, sideH-2);
-            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], p/2, y + sideH/2 + 5);
-            // 우측
-            ctx.fillStyle = hitBlocks.right === i ? '#0ff' : 'rgba(255,255,255,0.1)';
-            ctx.fillRect(width - p - 1, y+1, p, sideH-2);
-            ctx.fillStyle = '#fff'; ctx.fillText(notes[i], width - p/2, y + sideH/2 + 5);
-        }
-        // 충돌 하이라이트 초기화 (잔상)
-        Object.keys(hitBlocks).forEach(k => hitBlocks[k] = -1);
-    }
-
-    let startT = {x:0, y:0};
-    canvas.addEventListener('touchstart', e => {
-        const tx = e.touches[0].clientX; const ty = e.touches[0].clientY;
-        if (Math.hypot(meteor.x - tx, meteor.y - ty) < 40) {
-            meteor.isDragging = true;
-            startT = {x: tx, y: ty};
-        }
-    });
-    canvas.addEventListener('touchend', e => {
-        if(meteor.isDragging) {
-            meteor.vx = (e.changedTouches[0].clientX - startT.x) * 0.15;
-            meteor.vy = (e.changedTouches[0].clientY - startT.y) * 0.15;
-            meteor.isDragging = false;
-        }
-    });
-
-    function resetMeteor() { meteor.reset(); }
-    function togglePause() { 
-        isPaused = !isPaused; 
-        document.getElementById('pauseBtn').innerText = isPaused ? '▶' : '⏸';
-    }
-
-    function resize() {
-        width = window.innerWidth; height = window.innerHeight;
-        canvas.width = width; canvas.height = height;
-    }
-
-    function render() {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-        ctx.fillRect(0, 0, width, height);
-        drawGrid();
-        meteor.update();
-        meteor.draw();
-        requestAnimationFrame(render);
-    }
-
-    window.addEventListener('resize', resize);
-    resize(); render();
-</script>
+        window.addEventListener('resize', init);
+        init();
+        draw();
+    </script>
 </body>
 </html>
