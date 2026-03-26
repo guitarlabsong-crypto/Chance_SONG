@@ -3,25 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aleatoric Space V5 - SONG, YOUNG-MIN Guitar Lab</title>
+    <title>Aleatoric Space V6 - SONG, YOUNG-MIN Guitar Lab</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; touch-action: none; }
         #header {
             position: absolute; top: 0; width: 100%; height: 70px;
-            background: linear-gradient(to bottom, #001a33, #000d1a); display: flex;
+            background: #000; display: flex;
             flex-direction: column; align-items: center; justify-content: center; z-index: 100;
-            border-bottom: 2px solid #003366; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            border-bottom: 1px solid #222;
         }
-        #watermark { font-size: 11px; letter-spacing: 2.5px; color: #b3d9ff; margin-bottom: 7px; font-weight: bold; text-shadow: 0 0 5px #0ff; }
-        .controls { display: flex; gap: 30px; }
+        #watermark { font-size: 10px; letter-spacing: 2px; color: #444; margin-bottom: 8px; font-weight: bold; }
+        .controls { display: flex; gap: 15px; }
         .btn {
-            background: #00264d; border: 1px solid #004080; color: #e6f2ff;
-            width: 38px; height: 38px; border-radius: 50%; font-size: 18px;
+            background: #001f3f; border: 1px solid #003366; color: #fff;
+            padding: 5px 15px; border-radius: 4px; font-size: 11px; font-weight: bold;
             display: flex; align-items: center; justify-content: center; cursor: pointer;
-            box-shadow: inset 0 0 10px rgba(0,255,255,0.1), 0 2px 5px rgba(0,0,0,0.3);
-            transition: all 0.2s;
+            text-transform: uppercase; letter-spacing: 1px;
         }
-        .btn:active { transform: scale(0.95); background: #003366; box-shadow: inset 0 0 15px rgba(0,255,255,0.2); }
+        .btn:active { background: #003366; }
         canvas { display: block; }
     </style>
 </head>
@@ -30,8 +29,8 @@
 <div id="header">
     <div id="watermark">SONG, YOUNG-MIN Guitar Lab</div>
     <div class="controls">
-        <div class="btn" onclick="resetMeteor()">⭐</div>
-        <div class="btn" onclick="togglePause()" id="pauseBtn">⏸</div>
+        <div class="btn" onclick="spawnMeteor()">SPAWN</div>
+        <div class="btn" onclick="togglePause()" id="pauseBtn">PAUSE</div>
     </div>
 </div>
 
@@ -45,248 +44,164 @@
     
     let width, height;
     let isPaused = false;
-    const blockSize = 30; // 벽돌 두께
+    const blockSize = 30; 
+    let meteors = [];
     let hitBlocks = { top: -1, bottom: -1, left: -1, right: -1 };
 
-    // --- Audio Context & True Reverb (웅장한 우주 잔향) ---
+    // --- Audio Context & Reverb ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const convolver = audioCtx.createConvolver();
     const mainGain = audioCtx.createGain();
-    mainGain.gain.value = 0.7;
+    mainGain.gain.value = 0.5;
 
-    // 리버브용 임펄스 리스폰스 생성 (가상의 웅장한 공간)
     function createImpulseResponse(duration, decay) {
-        const sampleRate = audioCtx.sampleRate;
-        const length = sampleRate * duration;
-        const impulse = audioCtx.createBuffer(2, length, sampleRate);
+        const length = audioCtx.sampleRate * duration;
+        const impulse = audioCtx.createBuffer(2, length, audioCtx.sampleRate);
         for (let channel = 0; channel < 2; channel++) {
-            const channelData = impulse.getChannelData(channel);
-            for (let i = 0; i < length; i++) {
-                channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
-            }
+            const data = impulse.getChannelData(channel);
+            for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
         }
         return impulse;
     }
-    convolver.buffer = createImpulseResponse(4, 4); // 4초 길이, 4의 감쇄율
-
+    convolver.buffer = createImpulseResponse(3, 3);
     convolver.connect(audioCtx.destination);
-    mainGain.connect(convolver); // 소리를 리버브로 보냄
-    mainGain.connect(audioCtx.destination); // 원음도 함께 출력 (Dry/Wet Mix)
+    mainGain.connect(convolver);
+    mainGain.connect(audioCtx.destination);
 
     function playNote(index) {
         if (audioCtx.state === 'suspended') audioCtx.resume();
         const osc = audioCtx.createOscillator();
         const g = audioCtx.createGain();
-        osc.type = 'triangle'; // 기타 소리와 유사한 배음을 가진 파형
+        osc.type = 'sine';
         osc.frequency.setValueAtTime(freqs[index % 12], audioCtx.currentTime);
-        g.gain.setValueAtTime(0.5, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1);
+        g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
         osc.connect(g);
         g.connect(mainGain);
         osc.start();
-        osc.stop(audioCtx.currentTime + 1);
+        osc.stop(audioCtx.currentTime + 1.5);
     }
 
-    // --- Physics: Irregular Rock Meteor (불규칙 바위 운석) ---
     class Meteor {
-        constructor() {
-            this.vertices = [];
-            this.numVertices = 12; // 다각형 꼭짓점 수
-            this.reset();
-        }
-        reset() {
-            this.x = window.innerWidth / 2;
-            this.y = (window.innerHeight + 70) / 2;
+        constructor(x, y) {
+            this.x = x; this.y = y;
             this.vx = 0; this.vy = 0;
-            this.radius = 20; // 평균 반지름
-            this.angle = 0; // 자체 회전 각도
-            this.rotationSpeed = (Math.random() - 0.5) * 0.05; // 회전 속도
+            this.radius = 12; // 크기를 작게 조정
+            this.angle = 0;
+            this.rotationSpeed = (Math.random() - 0.5) * 0.08;
             this.isDragging = false;
-            
-            // 울퉁불퉁한 바위 모양 생성
             this.vertices = [];
-            for(let i=0; i<this.numVertices; i++) {
-                const angle = (i / this.numVertices) * Math.PI * 2;
-                const r = this.radius * (0.8 + Math.random() * 0.4); // 반지름에 변화를 줌
-                this.vertices.push({x: Math.cos(angle) * r, y: Math.sin(angle) * r});
+            for(let i=0; i<10; i++) {
+                const a = (i / 10) * Math.PI * 2;
+                const r = this.radius * (0.8 + Math.random() * 0.4);
+                this.vertices.push({x: Math.cos(a) * r, y: Math.sin(a) * r});
             }
         }
         update() {
             if (isPaused || this.isDragging) return;
-
-            // 관성 유지 (friction 없음)
             this.x += this.vx;
             this.y += this.vy;
-            this.angle += this.rotationSpeed; // 자체 회전
+            this.angle += this.rotationSpeed;
 
-            const topLimit = 70 + blockSize;
-            const bottomLimit = height - blockSize;
-            const leftLimit = blockSize;
-            const rightLimit = width - blockSize;
+            const limits = { t: 70+blockSize+this.radius, b: height-blockSize-this.radius, l: blockSize+this.radius, r: width-blockSize-this.radius };
 
-            // 불규칙 충돌 물리 (회전 및 다각형 면 반영)
-            // 가장 바깥쪽 꼭짓점 위치 계산
-            let maxR = 0;
-            let currentVertices = this.vertices.map(v => {
-                const x = v.x * Math.cos(this.angle) - v.y * Math.sin(this.angle);
-                const y = v.x * Math.sin(this.angle) + v.y * Math.cos(this.angle);
-                const r = Math.hypot(x, y);
-                if (r > maxR) maxR = r;
-                return {x: this.x + x, y: this.y + y};
-            });
-
-            // 벽 충돌 감지 및 불규칙 튕김
-            if (this.x - maxR < leftLimit) {
-                this.x = leftLimit + maxR; 
-                this.bounce(1, 0); // 수직 벽 충돌
+            if (this.x < limits.l || this.x > limits.r) {
+                this.vx *= -1;
+                this.rotationSpeed += (Math.random()-0.5)*0.02;
                 const idx = Math.floor(((this.y - 70) / (height - 70)) * 12);
-                hitBlocks.left = idx; playNote(idx);
-            } else if (this.x + maxR > rightLimit) {
-                this.x = rightLimit - maxR;
-                this.bounce(-1, 0);
-                const idx = Math.floor(((this.y - 70) / (height - 70)) * 12);
-                hitBlocks.right = idx; playNote(idx);
+                if (this.x < limits.l) { this.x = limits.l; hitBlocks.left = idx; } else { this.x = limits.r; hitBlocks.right = idx; }
+                playNote(idx);
             }
-
-            if (this.y - maxR < topLimit) {
-                this.y = topLimit + maxR;
-                this.bounce(0, 1); // 수평 벽 충돌
+            if (this.y < limits.t || this.y > limits.b) {
+                this.vy *= -1;
+                this.rotationSpeed += (Math.random()-0.5)*0.02;
                 const idx = Math.floor((this.x / width) * 12);
-                hitBlocks.top = idx; playNote(idx);
-            } else if (this.y + maxR > bottomLimit) {
-                this.y = bottomLimit - maxR;
-                this.bounce(0, -1);
-                const idx = Math.floor((this.x / width) * 12);
-                hitBlocks.bottom = idx; playNote(idx);
+                if (this.y < limits.t) { this.y = limits.t; hitBlocks.top = idx; } else { this.y = limits.b; hitBlocks.bottom = idx; }
+                playNote(idx);
             }
-        }
-        // 불규칙 튕김 로직 (회전 속도를 선속도로 변환하여 반영)
-        bounce(nx, ny) {
-            const rotVelX = -this.rotationSpeed * this.radius * ny;
-            const rotVelY = this.rotationSpeed * this.radius * nx;
-            
-            // 일반 반사 + 회전에 의한 힘 추가 (불규칙성)
-            this.vx = (this.vx * (nx === 0 ? 1 : -1)) + rotVelX * 0.5;
-            this.vy = (this.vy * (ny === 0 ? 1 : -1)) + rotVelY * 0.5;
-            
-            // 회전 속도도 충돌에 의해 미세하게 변함
-            this.rotationSpeed += (Math.random() - 0.5) * 0.01;
         }
         draw() {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.rotate(this.angle);
-            
-            // 바위 질감 (주황색 울퉁불퉁)
-            ctx.fillStyle = '#ff9933'; // 주황색
-            ctx.strokeStyle = '#b35900'; // 짙은 갈색 테두리
-            ctx.lineWidth = 2;
+            ctx.fillStyle = '#ff6600'; // 주황색 바위
             ctx.beginPath();
             ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
-            for(let i=1; i<this.numVertices; i++) {
-                ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
-            }
+            this.vertices.forEach(v => ctx.lineTo(v.x, v.y));
             ctx.closePath();
-            
-            // 빛 효과 (Glow)
-            ctx.shadowBlur = 25; ctx.shadowColor = 'rgba(255, 153, 51, 0.8)';
+            ctx.shadowBlur = 15; ctx.shadowColor = '#ff6600';
             ctx.fill();
-            ctx.shadowBlur = 0; // 테두리는 Glow 제외
-            ctx.stroke();
-            
-            // 바위 표면 디테일 (크랙 효과)
-            ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1;
-            for(let i=0; i<this.numVertices; i+=2) {
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.lineTo(this.vertices[i].x * 0.6, this.vertices[i].y * 0.6);
-                ctx.stroke();
-            }
             ctx.restore();
         }
     }
 
-    const meteor = new Meteor();
-
-    function drawGrid() {
-        ctx.font = 'bold 12px "Segoe UI"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        const w = width / 12;
-        const h = (height - 70) / 12;
-
-        for(let i=0; i<12; i++) {
-            // 상/하 벽돌 (골드 테두리)
-            let tx = w * i;
-            ctx.strokeStyle = '#664400'; ctx.lineWidth = 1;
-            ctx.fillStyle = (hitBlocks.top === i) ? '#ffcc00' : 'rgba(179, 217, 255, 0.08)';
-            ctx.fillRect(tx+1, 71, w-2, blockSize); ctx.strokeRect(tx+1, 71, w-2, blockSize);
-            ctx.fillStyle = (hitBlocks.top === i) ? '#000' : '#b3d9ff';
-            ctx.fillText(notes[i], tx + w/2, 70 + blockSize/2);
-
-            ctx.fillStyle = (hitBlocks.bottom === i) ? '#ffcc00' : 'rgba(179, 217, 255, 0.08)';
-            ctx.fillRect(tx+1, height - blockSize - 1, w-2, blockSize); ctx.strokeRect(tx+1, height - blockSize - 1, w-2, blockSize);
-            ctx.fillStyle = (hitBlocks.bottom === i) ? '#000' : '#b3d9ff';
-            ctx.fillText(notes[i], tx + w/2, height - blockSize/2);
-
-            // 좌/우 벽돌
-            let ty = 70 + (h * i);
-            ctx.fillStyle = (hitBlocks.left === i) ? '#ffcc00' : 'rgba(179, 217, 255, 0.08)';
-            ctx.fillRect(1, ty+1, blockSize, h-2); ctx.strokeRect(1, ty+1, blockSize, h-2);
-            ctx.fillStyle = (hitBlocks.left === i) ? '#000' : '#b3d9ff';
-            ctx.fillText(notes[i], blockSize/2, ty + h/2);
-
-            ctx.fillStyle = (hitBlocks.right === i) ? '#ffcc00' : 'rgba(179, 217, 255, 0.08)';
-            ctx.fillRect(width - blockSize - 1, ty+1, blockSize, h-2); ctx.strokeRect(width - blockSize - 1, ty+1, blockSize, h-2);
-            ctx.fillStyle = (hitBlocks.right === i) ? '#000' : '#b3d9ff';
-            ctx.fillText(notes[i], width - blockSize/2, ty + h/2);
-        }
-        // 히트 상태 리셋
-        for(let key in hitBlocks) hitBlocks[key] = -1;
+    function spawnMeteor() {
+        meteors.push(new Meteor(width/2, (height+70)/2));
     }
 
+    function drawGrid() {
+        const w = width / 12;
+        const h = (height - 70) / 12;
+        ctx.font = '10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+        for(let i=0; i<12; i++) {
+            ctx.fillStyle = (hitBlocks.top === i) ? '#ff6600' : '#111';
+            ctx.fillRect(w*i+1, 71, w-2, blockSize);
+            ctx.fillStyle = (hitBlocks.bottom === i) ? '#ff6600' : '#111';
+            ctx.fillRect(w*i+1, height-blockSize-1, w-2, blockSize);
+            ctx.fillStyle = (hitBlocks.left === i) ? '#ff6600' : '#111';
+            ctx.fillRect(1, 70+h*i+1, blockSize, h-2);
+            ctx.fillStyle = (hitBlocks.right === i) ? '#ff6600' : '#111';
+            ctx.fillRect(width-blockSize-1, 70+h*i+1, blockSize, h-2);
+
+            ctx.fillStyle = '#444';
+            ctx.fillText(notes[i], w*i+w/2, 70+blockSize/2);
+            ctx.fillText(notes[i], w*i+w/2, height-blockSize/2);
+            ctx.fillText(notes[i], blockSize/2, 70+h*i+h/2);
+            ctx.fillText(notes[i], width-blockSize/2, 70+h*i+h/2);
+        }
+        for(let k in hitBlocks) hitBlocks[k] = -1;
+    }
+
+    let activeMeteor = null;
     let startT = {x:0, y:0};
+
     canvas.addEventListener('touchstart', e => {
         const tx = e.touches[0].clientX; const ty = e.touches[0].clientY;
-        // 운석 중심과의 거리 계산 (잡기 판정)
-        if (Math.hypot(meteor.x - tx, meteor.y - ty) < 50) {
-            meteor.isDragging = true;
-            startT = {x: tx, y: ty};
-            meteor.vx = 0; meteor.vy = 0; // 잡는 순간 속도 멈춤
-        }
+        meteors.forEach(m => {
+            if(Math.hypot(m.x - tx, m.y - ty) < 40) {
+                activeMeteor = m; m.isDragging = true; startT = {x:tx, y:ty};
+            }
+        });
     });
+
     canvas.addEventListener('touchend', e => {
-        if(meteor.isDragging) {
-            // 관성 유지: 드래그 속도 그대로 영원히 날아감
-            meteor.vx = (e.changedTouches[0].clientX - startT.x) * 0.12;
-            meteor.vy = (e.changedTouches[0].clientY - startT.y) * 0.12;
-            meteor.isDragging = false;
+        if(activeMeteor) {
+            activeMeteor.vx = (e.changedTouches[0].clientX - startT.x) * 0.15;
+            activeMeteor.vy = (e.changedTouches[0].clientY - startT.y) * 0.15;
+            activeMeteor.isDragging = false; activeMeteor = null;
         }
     });
 
-    function resetMeteor() { meteor.reset(); }
-    function togglePause() { 
-        isPaused = !isPaused; 
-        document.getElementById('pauseBtn').innerText = isPaused ? '▶' : '⏸';
+    function togglePause() {
+        isPaused = !isPaused;
+        document.getElementById('pauseBtn').innerText = isPaused ? 'RESUME' : 'PAUSE';
     }
 
     function resize() {
         width = window.innerWidth; height = window.innerHeight;
         canvas.width = width; canvas.height = height;
-        // 비율 유지하며 위치 조정
-        meteor.x = Math.max(blockSize+25, Math.min(width-blockSize-25, meteor.x));
-        meteor.y = Math.max(70+blockSize+25, Math.min(height-blockSize-25, meteor.y));
     }
 
     function render() {
-        ctx.fillStyle = 'rgba(0, 0, 5, 0.3)'; // 깊은 우주 느낌의 잔상
-        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
         drawGrid();
-        meteor.update();
-        meteor.draw();
+        meteors.forEach(m => { m.update(); m.draw(); });
         requestAnimationFrame(render);
     }
 
     window.addEventListener('resize', resize);
-    resize(); render();
+    resize(); spawnMeteor(); render();
 </script>
 </body>
 </html>
