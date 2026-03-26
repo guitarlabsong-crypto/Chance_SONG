@@ -3,24 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aleatoric Space V6 - SONG, YOUNG-MIN Guitar Lab</title>
+    <title>Aleatoric Space V7 - SONG, YOUNG-MIN Guitar Lab</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; touch-action: none; }
         #header {
             position: absolute; top: 0; width: 100%; height: 70px;
-            background: #000; display: flex;
+            background: rgba(0,0,0,0.9); display: flex;
             flex-direction: column; align-items: center; justify-content: center; z-index: 100;
-            border-bottom: 1px solid #222;
+            border-bottom: 1px solid #1a1a1a;
         }
-        #watermark { font-size: 10px; letter-spacing: 2px; color: #444; margin-bottom: 8px; font-weight: bold; }
+        #watermark { font-size: 10px; letter-spacing: 2px; color: #555; margin-bottom: 8px; font-weight: bold; }
         .controls { display: flex; gap: 15px; }
         .btn {
             background: #001f3f; border: 1px solid #003366; color: #fff;
-            padding: 5px 15px; border-radius: 4px; font-size: 11px; font-weight: bold;
-            display: flex; align-items: center; justify-content: center; cursor: pointer;
-            text-transform: uppercase; letter-spacing: 1px;
+            padding: 6px 18px; border-radius: 20px; font-size: 10px; font-weight: bold;
+            cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+            transition: background 0.2s;
         }
-        .btn:active { background: #003366; }
+        .btn:active { background: #004080; }
         canvas { display: block; }
     </style>
 </head>
@@ -44,28 +44,14 @@
     
     let width, height;
     let isPaused = false;
-    const blockSize = 30; 
+    const blockSize = 28; 
     let meteors = [];
-    let hitBlocks = { top: -1, bottom: -1, left: -1, right: -1 };
+    let hitBlocks = { t: -1, b: -1, l: -1, r: -1 };
 
-    // --- Audio Context & Reverb ---
+    // --- Audio Setup ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const convolver = audioCtx.createConvolver();
     const mainGain = audioCtx.createGain();
-    mainGain.gain.value = 0.5;
-
-    function createImpulseResponse(duration, decay) {
-        const length = audioCtx.sampleRate * duration;
-        const impulse = audioCtx.createBuffer(2, length, audioCtx.sampleRate);
-        for (let channel = 0; channel < 2; channel++) {
-            const data = impulse.getChannelData(channel);
-            for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
-        }
-        return impulse;
-    }
-    convolver.buffer = createImpulseResponse(3, 3);
-    convolver.connect(audioCtx.destination);
-    mainGain.connect(convolver);
+    mainGain.gain.value = 0.4;
     mainGain.connect(audioCtx.destination);
 
     function playNote(index) {
@@ -75,63 +61,131 @@
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freqs[index % 12], audioCtx.currentTime);
         g.gain.setValueAtTime(0.3, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.2);
         osc.connect(g);
         g.connect(mainGain);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 1.5);
+        osc.start(); osc.stop(audioCtx.currentTime + 1.2);
+    }
+
+    // --- Rounded Rectangle Drawing Helper ---
+    function fillRoundedRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.fill();
     }
 
     class Meteor {
         constructor(x, y) {
             this.x = x; this.y = y;
             this.vx = 0; this.vy = 0;
-            this.radius = 12; // 크기를 작게 조정
-            this.angle = 0;
-            this.rotationSpeed = (Math.random() - 0.5) * 0.08;
+            this.radius = 10;
+            this.angle = Math.random() * Math.PI * 2;
+            this.rotationSpeed = (Math.random() - 0.5) * 0.1;
             this.isDragging = false;
+            this.history = []; // 잔상 기록
             this.vertices = [];
-            for(let i=0; i<10; i++) {
-                const a = (i / 10) * Math.PI * 2;
-                const r = this.radius * (0.8 + Math.random() * 0.4);
-                this.vertices.push({x: Math.cos(a) * r, y: Math.sin(a) * r});
+            for(let i=0; i<8; i++) {
+                const a = (i/8)*Math.PI*2;
+                const r = this.radius * (0.8 + Math.random()*0.4);
+                this.vertices.push({x: Math.cos(a)*r, y: Math.sin(a)*r});
             }
         }
+
         update() {
             if (isPaused || this.isDragging) return;
+
+            // 잔상 기록 업데이트
+            this.history.push({x: this.x, y: this.y});
+            if (this.history.length > 15) this.history.shift();
+
             this.x += this.vx;
             this.y += this.vy;
             this.angle += this.rotationSpeed;
 
             const limits = { t: 70+blockSize+this.radius, b: height-blockSize-this.radius, l: blockSize+this.radius, r: width-blockSize-this.radius };
 
+            // 벽 충돌
             if (this.x < limits.l || this.x > limits.r) {
                 this.vx *= -1;
-                this.rotationSpeed += (Math.random()-0.5)*0.02;
                 const idx = Math.floor(((this.y - 70) / (height - 70)) * 12);
-                if (this.x < limits.l) { this.x = limits.l; hitBlocks.left = idx; } else { this.x = limits.r; hitBlocks.right = idx; }
+                if (this.x < limits.l) { this.x = limits.l; hitBlocks.l = idx; } else { this.x = limits.r; hitBlocks.r = idx; }
                 playNote(idx);
             }
             if (this.y < limits.t || this.y > limits.b) {
                 this.vy *= -1;
-                this.rotationSpeed += (Math.random()-0.5)*0.02;
                 const idx = Math.floor((this.x / width) * 12);
-                if (this.y < limits.t) { this.y = limits.t; hitBlocks.top = idx; } else { this.y = limits.b; hitBlocks.bottom = idx; }
+                if (this.y < limits.t) { this.y = limits.t; hitBlocks.t = idx; } else { this.y = limits.b; hitBlocks.b = idx; }
                 playNote(idx);
             }
         }
+
         draw() {
+            // 1. 잔상 그리기
+            this.history.forEach((pos, i) => {
+                const alpha = i / this.history.length * 0.3;
+                ctx.fillStyle = `rgba(255, 102, 0, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, this.radius * (i / this.history.length), 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // 2. 운석 본체
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.rotate(this.angle);
-            ctx.fillStyle = '#ff6600'; // 주황색 바위
+            ctx.fillStyle = '#ff6600';
+            ctx.shadowBlur = 10; ctx.shadowColor = '#ff6600';
             ctx.beginPath();
             ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
             this.vertices.forEach(v => ctx.lineTo(v.x, v.y));
             ctx.closePath();
-            ctx.shadowBlur = 15; ctx.shadowColor = '#ff6600';
             ctx.fill();
             ctx.restore();
+        }
+    }
+
+    // 운석 간 충돌 물리 엔진
+    function resolveMeteorCollision() {
+        for (let i = 0; i < meteors.length; i++) {
+            for (let j = i + 1; j < meteors.length; j++) {
+                let m1 = meteors[i];
+                let m2 = meteors[j];
+                let dx = m2.x - m1.x;
+                let dy = m2.y - m1.y;
+                let distance = Math.hypot(dx, dy);
+                let minDistance = m1.radius + m2.radius + 5;
+
+                if (distance < minDistance) {
+                    // 위치 보정 (겹침 방지)
+                    let overlap = minDistance - distance;
+                    let nx = dx / distance;
+                    let ny = dy / distance;
+                    m1.x -= nx * overlap / 2;
+                    m1.y -= ny * overlap / 2;
+                    m2.x += nx * overlap / 2;
+                    m2.y += ny * overlap / 2;
+
+                    // 속도 교환 (완성 탄성 충돌)
+                    let p = (m1.vx * nx + m1.vy * ny - m2.vx * nx - m2.vy * ny);
+                    m1.vx -= p * nx;
+                    m1.vy -= p * ny;
+                    m2.vx += p * nx;
+                    m2.vy += p * ny;
+                    
+                    // 충돌 시 회전 변화
+                    m1.rotationSpeed += (Math.random()-0.5)*0.1;
+                    m2.rotationSpeed += (Math.random()-0.5)*0.1;
+                }
+            }
         }
     }
 
@@ -142,19 +196,23 @@
     function drawGrid() {
         const w = width / 12;
         const h = (height - 70) / 12;
-        ctx.font = '10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = 'bold 9px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
         for(let i=0; i<12; i++) {
-            ctx.fillStyle = (hitBlocks.top === i) ? '#ff6600' : '#111';
-            ctx.fillRect(w*i+1, 71, w-2, blockSize);
-            ctx.fillStyle = (hitBlocks.bottom === i) ? '#ff6600' : '#111';
-            ctx.fillRect(w*i+1, height-blockSize-1, w-2, blockSize);
-            ctx.fillStyle = (hitBlocks.left === i) ? '#ff6600' : '#111';
-            ctx.fillRect(1, 70+h*i+1, blockSize, h-2);
-            ctx.fillStyle = (hitBlocks.right === i) ? '#ff6600' : '#111';
-            ctx.fillRect(width-blockSize-1, 70+h*i+1, blockSize, h-2);
+            // 상단
+            ctx.fillStyle = (hitBlocks.t === i) ? '#ff6600' : '#111';
+            fillRoundedRect(w*i+2, 72, w-4, blockSize-4, 8);
+            // 하단
+            ctx.fillStyle = (hitBlocks.b === i) ? '#ff6600' : '#111';
+            fillRoundedRect(w*i+2, height-blockSize+2, w-4, blockSize-4, 8);
+            // 좌측
+            ctx.fillStyle = (hitBlocks.l === i) ? '#ff6600' : '#111';
+            fillRoundedRect(2, 70+h*i+2, blockSize-4, h-4, 8);
+            // 우측
+            ctx.fillStyle = (hitBlocks.r === i) ? '#ff6600' : '#111';
+            fillRoundedRect(width-blockSize+2, 70+h*i+2, blockSize-4, h-4, 8);
 
-            ctx.fillStyle = '#444';
+            ctx.fillStyle = '#333';
             ctx.fillText(notes[i], w*i+w/2, 70+blockSize/2);
             ctx.fillText(notes[i], w*i+w/2, height-blockSize/2);
             ctx.fillText(notes[i], blockSize/2, 70+h*i+h/2);
@@ -196,6 +254,7 @@
     function render() {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
         drawGrid();
+        resolveMeteorCollision();
         meteors.forEach(m => { m.update(); m.draw(); });
         requestAnimationFrame(render);
     }
