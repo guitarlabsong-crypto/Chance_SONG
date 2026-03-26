@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aleatoric Space V11 - Elemental Drag</title>
+    <title>Aleatoric Space V12 - SONG, YOUNG-MIN Guitar Lab</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; touch-action: none; }
         #header {
@@ -12,15 +12,15 @@
             flex-direction: column; align-items: center; justify-content: center; z-index: 100;
             border-bottom: 1px solid #1a1a1a;
         }
-        #watermark { font-size: 10px; letter-spacing: 2px; color: #444; margin-bottom: 8px; font-weight: bold; }
-        .controls { display: flex; gap: 8px; align-items: center; }
+        #watermark { font-size: 10px; letter-spacing: 2px; color: #555; margin-bottom: 8px; font-weight: bold; }
+        .controls { display: flex; gap: 10px; align-items: center; }
         .btn {
             background: #001f3f; border: 1px solid #003366; color: #fff;
-            padding: 6px 14px; border-radius: 20px; font-size: 10px; font-weight: bold;
+            padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold;
             cursor: pointer; text-transform: uppercase; transition: 0.2s;
         }
-        .btn:active { transform: scale(0.9); }
-        .label { color: #555; font-size: 9px; font-weight: bold; }
+        .btn:active { transform: scale(0.9); background: #003366; }
+        .label { color: #444; font-size: 9px; font-weight: bold; }
         canvas { display: block; }
     </style>
 </head>
@@ -30,7 +30,7 @@
     <div id="watermark">SONG, YOUNG-MIN Guitar Lab</div>
     <div class="controls">
         <div id="spawnBtn" class="btn" onclick="handleSpawn()" style="border-color: #ffd700;">SPAWN (Au)</div>
-        <div style="width:5px"></div>
+        <div style="width:10px"></div>
         <span class="label">SPEED</span>
         <div class="btn" onclick="changeSpeed(-1)">-</div>
         <div class="btn" onclick="changeSpeed(1)">+</div>
@@ -51,19 +51,18 @@
     let meteors = [];
     let hitBlocks = { t: -1, b: -1, l: -1, r: -1, color: '#fff' };
 
-    // 5단계 원소: 금, 은, 철, 구리, 탄소
     const elementTypes = [
-        { symbol: 'Au', color: '#ffd700', mass: 2.5 }, // 금 (노랑)
-        { symbol: 'Ag', color: '#c0c0c0', mass: 1.8 }, // 은 (은색)
-        { symbol: 'Fe', color: '#8b8b83', mass: 2.0 }, // 철 (회색)
-        { symbol: 'Cu', color: '#ff7f24', mass: 2.2 }, // 구리 (주황)
-        { symbol: 'C',  color: '#444444', mass: 1.2 }  // 탄소 (검정색에 가까운 회색)
+        { symbol: 'Au', color: '#ffd700', mass: 2.5 },
+        { symbol: 'Ag', color: '#e0e0e0', mass: 1.8 },
+        { symbol: 'Fe', color: '#8b8b83', mass: 2.0 },
+        { symbol: 'Cu', color: '#ff7f24', mass: 2.2 },
+        { symbol: 'C',  color: '#444444', mass: 1.2 }
     ];
     let currentElemIdx = 0;
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const mainGain = audioCtx.createGain();
-    mainGain.gain.value = 0.6;
+    mainGain.gain.value = 0.5;
     mainGain.connect(audioCtx.destination);
 
     function playScaledNote(index, radius) {
@@ -74,14 +73,14 @@
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freqs[index % 12], audioCtx.currentTime);
         
-        // 볼륨은 반지름(radius)에 정비례 (최대 25 기준)
-        const volume = (radius / 25) * 0.5;
+        // 볼륨 로직: 반지름에 정비례 (최대 22일 때 0.5, 최소 5일 때 0.1)
+        const volume = (radius / 22) * 0.4;
         g.gain.setValueAtTime(volume, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.2);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.0);
         
         osc.connect(g);
         g.connect(mainGain);
-        osc.start(); osc.stop(audioCtx.currentTime + 1.2);
+        osc.start(); osc.stop(audioCtx.currentTime + 1.0);
     }
 
     class Meteor {
@@ -91,7 +90,7 @@
             this.radius = radius;
             this.config = config;
             this.angle = Math.random() * Math.PI * 2;
-            this.rotationSpeed = (Math.random() - 0.5) * 0.05;
+            this.rotationSpeed = 0.02; // 초기 자전 속도
             this.history = [];
             this.isDragging = false;
             this.vertices = this.createRockShape();
@@ -110,8 +109,10 @@
         update() {
             if (isPaused || this.isDragging) return;
             
-            this.history.push({x: this.x, y: this.y});
-            if (this.history.length > 10) this.history.shift();
+            if(Math.abs(this.vx) > 0 || Math.abs(this.vy) > 0) {
+                this.history.push({x: this.x, y: this.y});
+                if (this.history.length > 8) this.history.shift();
+            }
 
             this.x += this.vx * tempoScale;
             this.y += this.vy * tempoScale;
@@ -120,14 +121,14 @@
             const limits = { t: 75+blockSize+this.radius, b: height-blockSize-this.radius, l: blockSize+this.radius, r: width-blockSize-this.radius };
 
             if (this.x < limits.l || this.x > limits.r) {
-                this.vx *= -0.92;
+                this.vx *= -0.95;
                 const idx = Math.floor(((this.y - 75) / (height - 75)) * 12);
                 hitBlocks.color = this.config.color;
                 if (this.x < limits.l) { this.x = limits.l; hitBlocks.l = idx; } else { this.x = limits.r; hitBlocks.r = idx; }
                 playScaledNote(idx, this.radius);
             }
             if (this.y < limits.t || this.y > limits.b) {
-                this.vy *= -0.92;
+                this.vy *= -0.95;
                 const idx = Math.floor((this.x / width) * 12);
                 hitBlocks.color = this.config.color;
                 if (this.y < limits.t) { this.y = limits.t; hitBlocks.t = idx; } else { this.y = limits.b; hitBlocks.b = idx; }
@@ -137,13 +138,13 @@
 
         draw() {
             this.history.forEach((pos, i) => {
-                ctx.globalAlpha = (i / 10) * 0.25;
+                ctx.globalAlpha = (i / 8) * 0.2;
                 ctx.fillStyle = this.config.color;
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.radius * (i/10), 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.radius * (i/8), 0, Math.PI*2); ctx.fill();
             });
             ctx.save();
             ctx.translate(this.x, this.y); ctx.rotate(this.angle);
-            ctx.fillStyle = this.config.color; ctx.shadowBlur = 12; ctx.shadowColor = this.config.color;
+            ctx.fillStyle = this.config.color; ctx.shadowBlur = 15; ctx.shadowColor = this.config.color;
             ctx.beginPath(); ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
             this.vertices.forEach(v => ctx.lineTo(v.x, v.y));
             ctx.closePath(); ctx.fill();
@@ -158,25 +159,28 @@
                 let m1 = meteors[i], m2 = meteors[j];
                 let dist = Math.hypot(m2.x - m1.x, m2.y - m1.y);
                 if (dist < m1.radius + m2.radius) {
-                    if (m1.radius > 8 && m2.radius > 8) { // 어느 정도 크기가 있을 때만 쪼개짐
+                    // 분열 조건 (어느 정도 크기가 있을 때 부드럽게 쪼개짐)
+                    if (m1.radius > 7 && m2.radius > 7) {
                         toRemove.push(i, j);
-                        // 질량 보존을 고려해 반지름을 약 80% 수준으로 유지 (급격히 작아짐 방지)
-                        toAdd.push(new Meteor(m1.x, m1.y, m1.config, m1.radius * 0.8));
-                        toAdd.push(new Meteor(m2.x, m2.y, m2.config, m2.radius * 0.8));
+                        // 쪼개질 때 크기 감소폭을 완만하게 (0.85배)
+                        const splitM1a = new Meteor(m1.x-5, m1.y, m1.config, m1.radius * 0.85);
+                        const splitM1b = new Meteor(m1.x+5, m1.y, m1.config, m1.radius * 0.85);
+                        splitM1a.vx = -m1.vx * 0.5; splitM1a.vy = -m1.vy * 0.5;
+                        splitM1b.vx = m1.vx * 0.8; splitM1b.vy = m1.vy * 0.8;
+                        toAdd.push(splitM1a, splitM1b);
                     } else {
-                        // 작을 때는 튕기기
-                        let tempVx = m1.vx; m1.vx = m2.vx; m2.vx = tempVx;
-                        let tempVy = m1.vy; m1.vy = m2.vy; m2.vy = tempVy;
+                        // 작을 때는 튕기기 (에너지 전달)
+                        let nx = (m2.x - m1.x) / dist; let ny = (m2.y - m1.y) / dist;
+                        let p = 2 * (m1.vx * nx + m1.vy * ny - m2.vx * nx - m2.vy * ny) / (m1.config.mass + m2.config.mass);
+                        m1.vx -= p * m2.config.mass * nx; m1.vy -= p * m2.config.mass * ny;
+                        m2.vx += p * m1.config.mass * nx; m2.vy += p * m1.config.mass * ny;
                     }
                 }
             }
         }
         const uniqueRemove = [...new Set(toRemove)].sort((a, b) => b - a);
         uniqueRemove.forEach(idx => meteors.splice(idx, 1));
-        toAdd.forEach(m => {
-            m.vx = (Math.random()-0.5)*5; m.vy = (Math.random()-0.5)*5;
-            meteors.push(m);
-        });
+        toAdd.forEach(m => meteors.push(m));
     }
 
     function handleSpawn() {
@@ -211,28 +215,20 @@
     }
 
     let activeMeteor = null; let startT = {x:0, y:0};
-
-    // 드래그 기능 구현
     canvas.addEventListener('pointerdown', e => {
         const tx = e.clientX; const ty = e.clientY;
         meteors.forEach(m => {
-            if(Math.hypot(m.x - tx, m.y - ty) < m.radius + 20) {
+            if(Math.hypot(m.x - tx, m.y - ty) < m.radius + 30) {
                 activeMeteor = m; m.isDragging = true; startT = {x:tx, y:ty};
-                m.vx = 0; m.vy = 0;
+                m.vx = 0; m.vy = 0; m.rotationSpeed = 0.1;
             }
         });
     });
-
-    canvas.addEventListener('pointermove', e => {
-        if(activeMeteor && activeMeteor.isDragging) {
-            activeMeteor.x = e.clientX; activeMeteor.y = e.clientY;
-        }
-    });
-
+    canvas.addEventListener('pointermove', e => { if(activeMeteor && activeMeteor.isDragging) { activeMeteor.x = e.clientX; activeMeteor.y = e.clientY; } });
     canvas.addEventListener('pointerup', e => {
         if(activeMeteor) {
-            activeMeteor.vx = (e.clientX - startT.x) * 0.2;
-            activeMeteor.vy = (e.clientY - startT.y) * 0.2;
+            activeMeteor.vx = (e.clientX - startT.x) * 0.15;
+            activeMeteor.vy = (e.clientY - startT.y) * 0.15;
             activeMeteor.isDragging = false; activeMeteor = null;
         }
     });
@@ -250,7 +246,10 @@
     }
 
     window.addEventListener('resize', resize);
-    resize(); render();
+    resize(); 
+    // 초기 운석 생성 (Au)
+    meteors.push(new Meteor(window.innerWidth/2, (window.innerHeight+75)/2, elementTypes[0], 22));
+    render();
 </script>
 </body>
 </html>
